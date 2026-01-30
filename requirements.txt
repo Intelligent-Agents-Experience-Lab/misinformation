@@ -1,0 +1,13 @@
+langchain
+langchain-openai
+langgraph
+pydantic
+python-dotenv
+requests
+beautifulsoup4
+pandas
+lxml
+langsmith
+openevals
+datasets
+openai
