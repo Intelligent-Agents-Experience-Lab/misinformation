@@ -25,7 +25,7 @@ meteor_metric = evaluate.load("meteor")
 # 1. Load Dataset
 print("Loading Health_Misinformation dataset...")
 ds = load_dataset("ClassyB/Health_Misinformation", split="train")
-subset = ds.select(range(10))
+subset = ds.select(range(300))
 
 # 2. Prepare LangSmith Dataset
 dataset_name = "Health_Misinformation_Eval_Subset"
