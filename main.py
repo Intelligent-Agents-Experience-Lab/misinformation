@@ -46,7 +46,7 @@ tools = [
 
 # 2. Setup LLM (Orchestrator)
 # Using GPT-4o or similar high-reasoning model is recommended for orchestration
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 llm_with_tools = llm.bind_tools(tools)
 
 # 3. Define Orchestrator Node
@@ -122,7 +122,7 @@ app = workflow.compile()
 if __name__ == "__main__":
     print("--- Orchestrator Initialized ---")
     
-    user_input = "The cost of dental implants is uniformly priced across different regions and providers."
+    user_input = "Drinking detox teas can cleanse your body of toxins."
     print(f"User Input: {user_input}\n")
     
     initial_state = {
