@@ -65,7 +65,8 @@ A2 must:
 - Summarize evidence with citations
 - Explicitly report gaps or missing evidence
 
-If A2 reports "insufficient evidence", mark the claim as "pending" and continue.
+If A2 reports "insufficient evidence", you MUST proceed to A3.
+Do NOT stop. Do NOT abstain. The lack of evidence will be used by A3 to label it as "Misinformation".
 
 ----------------------------------
 STEP 3: REASONING (A3)
@@ -83,7 +84,8 @@ A3 must:
 - Align claims with evidence spans
 - Identify supporting and counter evidence
 - Produce a provisional label:
-  {supported | refuted | insufficient | abstain}
+  {True | Misinformation}
+  (If evidence is missing or insufficient, label as "Misinformation")
 - Produce a short explanation grounded in cited spans
 - Output a confidence score
 
@@ -125,7 +127,7 @@ A5 must:
 - Present the final label
 - Provide a concise explanation
 - Display confidence and uncertainty
-- Explicitly communicate abstention if applicable
+- State "Misinformation" for unverified claims (do NOT abstain)
 - Preserve transparency and provenance
 
 ----------------------------------
@@ -133,7 +135,7 @@ FAIL-SAFE BEHAVIOR
 ----------------------------------
 
 At any point:
-- If evidence is weak -> abstain
+- If evidence is weak or missing -> label as "Misinformation"
 - If sources conflict -> lower confidence
 - If reasoning is ungrounded -> reject output
 - If user intent requests medical advice -> refuse safely
