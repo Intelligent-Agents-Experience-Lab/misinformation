@@ -122,7 +122,7 @@ app = workflow.compile()
 if __name__ == "__main__":
     print("--- Orchestrator Initialized ---")
     
-    user_input = "Smoking increases the risk of lung cancer."
+    user_input = "The cost of dental implants is uniformly priced across different regions and providers."
     print(f"User Input: {user_input}\n")
     
     initial_state = {

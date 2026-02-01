@@ -246,16 +246,17 @@ def reasoning_explanation_tool(claim: str, evidence: str, evidence_items: List[D
     # 2. Extract Spans
     spans = verbatim_span_extraction_tool(prioritized_docs, claim)
     
-    # 3. Compute Net Signal (Mock Logic for demo)
-    support_spans = [s for s in spans if s['type'] == 'support']
-    counter_spans = [s for s in spans if s['type'] == 'counter'] # Mocking counter detection
-    
-    # Simple heursitic: check if we have specific keywords in the snippets or title
-    # In a real system, this would come from the NLI model in extraction tool
-    net_signal = 0.5 # Default to weak support if we found prioritized evidence
-    
     # Analyze the content of the evidence strings for better mock behavior
     full_text = " ".join([d.get("snippet", "") + " " + d.get("title", "") for d in prioritized_docs]).lower()
+    
+    # 3. Compute Net Signal (Mock Logic for demo)
+    net_signal = 0.5 # Default to weak support if we found prioritized evidence
+    
+    # Check for empty evidence - TREAT AS MISINFORMATION per user request
+    if not prioritized_docs:
+        print("[A3 Reasoning] No prioritized evidence found. Defaulting to Misinformation.")
+        net_signal = -2.0 # Strong Refute signal to drive confidence to 0
+        full_text = "no evidence found"
     
     # Refutation keywords (Check these FIRST)
     if any(x in full_text for x in ["no evidence", "debunk", "false", "fake", "myth", "refute", "incorrect", "hoax", "scam", "unproven", "not work"]):
