@@ -5,8 +5,9 @@ import time
 import re
 from datasets import load_dataset
 from langsmith import Client
-from openevals.llm import create_llm_as_judge
-from openevals.prompts import CORRECTNESS_PROMPT
+from langchain_openai import ChatOpenAI
+# from openevals.llm import create_llm_as_judge
+# from openevals.prompts import CORRECTNESS_PROMPT
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from main import app
 from dotenv import load_dotenv
@@ -92,9 +93,29 @@ def target(inputs: dict) -> dict:
     except Exception as e:
         return {"answer": f"Error: {str(e)}", "tools_called": tools_called, "latency_sec": time.perf_counter() - start_time}
 
+    try:
+        if "```json" in final_output_str:
+            clean_json = final_output_str.replace("```json", "").replace("```", "").strip()
+            data = json.loads(clean_json)
+        else:
+            data = json.loads(final_output_str)
+            
+        # Extract fields from the first claim
+        if "claims" in data and len(data["claims"]) > 0:
+            claim_data = data["claims"][0]
+            answer_text = f"Label: {claim_data.get('label')}\nExplanation: {claim_data.get('explanation')}"
+            predicted_label = claim_data.get("label")
+        else:
+            answer_text = final_output_str
+            predicted_label = "Unknown"
+    except:
+        answer_text = final_output_str
+        predicted_label = "Parse Error"
+
     end_time = time.perf_counter()
     return {
-        "answer": final_output_str, 
+        "answer": answer_text, 
+        "predicted_label": predicted_label,
         "tools_called": tools_called, 
         "evidence": evidence_context,
         "entities": list(set(entities_found)),
@@ -104,12 +125,42 @@ def target(inputs: dict) -> dict:
 # 4. Define Evaluators
 
 def health_correctness_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
-    evaluator = create_llm_as_judge(
-        prompt=CORRECTNESS_PROMPT,
-        model="openai:o3-mini",
-        feedback_key="correctness",
-    )
-    return evaluator(inputs=inputs, outputs=outputs, reference_outputs=reference_outputs)
+    # Custom LLM-as-a-judge implementation since openevals is missing
+    judge_llm = ChatOpenAI(model="o3-mini")
+    
+    question = inputs.get("question", "")
+    prediction = outputs.get("answer", "")
+    reference_reason = reference_outputs.get("answer", "")
+    reference_label = reference_outputs.get("label", "")
+    
+    prompt = f"""You are an expert medical misinformation evaluator.
+    Compare the Model's Response to the Reference Answer.
+    
+    Question: {question}
+    
+    Reference Label: {reference_label}
+    Reference Reason: {reference_reason}
+    
+    Model Response: {prediction}
+    
+    Task:
+    1. Verify if the Model's label (True/Misinformation) matches the Reference Label.
+    2. Verify if the Model's explanation captures the key points of the Reference Reason.
+    3. Ignore minor phrasing differences. Focus on semantic accuracy.
+    
+    Return a JSON object with:
+    - score: (0 to 1, where 1 is correct)
+    - contrast: (Explanation of differences)
+    """
+    
+    try:
+        response = judge_llm.invoke(prompt)
+        # Simple parsing if model returns raw JSON string
+        content = response.content.replace("```json", "").replace("```", "").strip()
+        result = json.loads(content)
+        return {"key": "correctness", "score": result.get("score", 0), "comment": result.get("contrast", "")}
+    except Exception as e:
+        return {"key": "correctness", "score": 0, "comment": f"Eval Error: {str(e)}"}
 
 def hf_statistical_evaluators(inputs: dict, outputs: dict, reference_outputs: dict):
     prediction = outputs.get("answer", "")

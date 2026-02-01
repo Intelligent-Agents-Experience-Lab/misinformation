@@ -11,24 +11,37 @@ from dotenv import load_dotenv
 # Import our custom modules
 from state import AgentState
 from tools import (
-    claim_parsing_agent,
-    deep_evidence_retrieval_agent,
-    reasoning_explanation_agent,
-    critic_calibration_agent,
-    final_reporting_agent
+    claim_parsing_tool,
+    evidence_retrieval_tool,
+    reasoning_explanation_tool,
+    critic_calibration_tool,
+    final_reporting_tool,
+    pubmed_search_tool,
+    filtering_and_dedup_tool,
+    cross_lingual_bundle_tool,
+    evidence_prioritization_tool,
+    verbatim_span_extraction_tool,
+    logistic_calibration_tool,
+    span_faithfulness_tool,
+    recency_decay_tool,
+    confidence_adjustment_tool,
+    debate_adjudicator_tool
 )
 from orchestrator_prompt import ORCHESTRATOR_SYSTEM_PROMPT
+
 
 # Load environment variables (ensure .env exists with OPENAI_API_KEY)
 load_dotenv()
 
 # 1. Setup Tools
 tools = [
-    claim_parsing_agent,
-    deep_evidence_retrieval_agent,
-    reasoning_explanation_agent,
-    critic_calibration_agent,
-    final_reporting_agent
+    claim_parsing_tool,
+    evidence_retrieval_tool,
+    reasoning_explanation_tool,
+    critic_calibration_tool,
+    final_reporting_tool,
+    pubmed_search_tool,
+    cross_lingual_bundle_tool
 ]
 
 # 2. Setup LLM (Orchestrator)
@@ -107,9 +120,9 @@ app = workflow.compile()
 
 # 5. Example Execution
 if __name__ == "__main__":
-    print("--- Antigravity Orchestrator Initialized ---")
+    print("--- Orchestrator Initialized ---")
     
-    user_input = "Vaccines can cause autism."
+    user_input = "Smoking increases the risk of lung cancer."
     print(f"User Input: {user_input}\n")
     
     initial_state = {
