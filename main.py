@@ -122,7 +122,7 @@ app = workflow.compile()
 if __name__ == "__main__":
     print("--- Orchestrator Initialized ---")
     
-    user_input = "Drinking detox teas can cleanse your body of toxins."
+    user_input = "Social media can be a tool for health promotion and education."
     print(f"User Input: {user_input}\n")
     
     initial_state = {
