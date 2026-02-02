@@ -32,7 +32,7 @@ dataset_name = "Health_Misinformation_Eval_Subset"
 try:
     langsmith_dataset = client.create_dataset(
         dataset_name=dataset_name, 
-        description="Subset of 10 examples from Health_Misinformation for verification workflow testing."
+        description="Subset of 300 examples from Health_Misinformation for verification workflow testing."
     )
 except Exception:
     langsmith_dataset = client.read_dataset(dataset_name=dataset_name)
