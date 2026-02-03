@@ -25,7 +25,8 @@ from tools import (
     span_faithfulness_tool,
     recency_decay_tool,
     confidence_adjustment_tool,
-    debate_adjudicator_tool
+    debate_adjudicator_tool,
+    set_ablation_config  # Import config setter
 )
 from orchestrator_prompt import ORCHESTRATOR_SYSTEM_PROMPT
 
@@ -33,92 +34,124 @@ from orchestrator_prompt import ORCHESTRATOR_SYSTEM_PROMPT
 # Load environment variables (ensure .env exists with OPENAI_API_KEY)
 load_dotenv()
 
-# 1. Setup Tools
-tools = [
-    claim_parsing_tool,
-    evidence_retrieval_tool,
-    reasoning_explanation_tool,
-    critic_calibration_tool,
-    final_reporting_tool,
-    pubmed_search_tool,
-    cross_lingual_bundle_tool
-]
-
-# 2. Setup LLM (Orchestrator)
-# Using GPT-4o or similar high-reasoning model is recommended for orchestration
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-llm_with_tools = llm.bind_tools(tools)
-
-# 3. Define Orchestrator Node
-def orchestrator_node(state: AgentState):
+# Factory function for creating the workflow dynamically
+def create_workflow(config: dict = None, tools_list: list = None, llm_config: dict = None):
     """
-    The Orchestrator node uses the history of messages to decide the next step.
-    It uses the specific system prompt to govern the workflow.
+    Creates and compiles the StateGraph workflow.
+    Args:
+        config (dict): Optional ablation configuration to override defaults.
+        tools_list (list): Optional list of tools to use (defaults to full set).
+        llm_config (dict): Optional LLM settings (model_name, base_url, api_key).
     """
-    messages = state["messages"]
     
-    # Ensure system prompt is the first message
-    # In a real app, you might handle this initialization differently
-    prompt_message = SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT)
+    # 1. Update Global Ablation Config if provided
+    if config:
+        set_ablation_config(config)
+        print(f"--- Workflow Created with Config: {config} ---")
+
+    # 2. Setup Tools
+    # Default set of tools if not provided
+    if tools_list is None:
+        tools_list = [
+            claim_parsing_tool,
+            evidence_retrieval_tool,
+            reasoning_explanation_tool,
+            critic_calibration_tool,
+            final_reporting_tool,
+            pubmed_search_tool,
+            cross_lingual_bundle_tool
+        ]
     
-    # We construct the call. If messages is empty (start), add system prompt.
-    # If not empty, we need to ensure the model sees the system prompt.
-    # LangChain ChatOpenAI usually handles 'system' roles well.
+    # 3. Setup LLM (Orchestrator)
+    # Defaults
+    model_name = "gpt-4o-mini"
+    kwargs = {"temperature": 0}
     
-    if not messages or not isinstance(messages[0], SystemMessage):
-         # If the state doesn't have the system prompt, we logically prepend it for the API call
-         # but maybe not persist it to state if we want to extract it later.
-         # For simplicity, let's just invoke with [System, ...messages]
-         invocation_messages = [prompt_message] + messages
-    else:
-         invocation_messages = messages
-         
-    # Invoke the LLM
-    response = llm_with_tools.invoke(invocation_messages)
+    if llm_config:
+        print(f"--- Initializing Orchestrator with LLM: {llm_config} ---")
+        if "model_name" in llm_config:
+            model_name = llm_config["model_name"]
+        if "base_url" in llm_config:
+            kwargs["base_url"] = llm_config["base_url"]
+        if "api_key" in llm_config:
+            kwargs["api_key"] = llm_config["api_key"]
     
-    # Return the new AI Message (update state)
-    return {"messages": [response]}
+    llm = ChatOpenAI(model=model_name, **kwargs)
+    llm_with_tools = llm.bind_tools(tools_list)
 
-# 4. Define Graph
-workflow = StateGraph(AgentState)
+    # 4. Define Orchestrator Node
+    def orchestrator_node(state: AgentState):
+        """
+        The Orchestrator node uses the history of messages to decide the next step.
+        It uses the specific system prompt to govern the workflow.
+        """
+        messages = state["messages"]
+        
+        # Ensure system prompt is the first message
+        # In a real app, you might handle this initialization differently
+        prompt_message = SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT)
+        
+        # We construct the call. If messages is empty (start), add system prompt.
+        # If not empty, we need to ensure the model sees the system prompt.
+        # LangChain ChatOpenAI usually handles 'system' roles well.
+        
+        if not messages or not isinstance(messages[0], SystemMessage):
+             # If the state doesn't have the system prompt, we logically prepend it for the API call
+             # but maybe not persist it to state if we want to extract it later.
+             # For simplicity, let's just invoke with [System, ...messages]
+             invocation_messages = [prompt_message] + messages
+        else:
+             invocation_messages = messages
+             
+        # Invoke the LLM
+        response = llm_with_tools.invoke(invocation_messages)
+        
+        # Return the new AI Message (update state)
+        return {"messages": [response]}
 
-# Add nodes
-workflow.add_node("orchestrator", orchestrator_node)
-workflow.add_node("tools", ToolNode(tools))
-
-# Add edges
-workflow.add_edge(START, "orchestrator")
-
-def should_continue(state: AgentState):
-    """
-    Determine if we should continue to tools or end.
-    """
-    last_message = state["messages"][-1]
+    # 5. Define Graph
+    workflow = StateGraph(AgentState)
     
-    # If the LLM called a tool, route there
-    if last_message.tool_calls:
-        return "tools"
+    # Add nodes
+    workflow.add_node("orchestrator", orchestrator_node)
+    workflow.add_node("tools", ToolNode(tools_list))
     
-    # Otherwise, if it returned text (and hopefully the final JSON), end
-    # Ideally, we'd validate the JSON structure here.
-    return END
+    # Add edges
+    workflow.add_edge(START, "orchestrator")
+    
+    def should_continue(state: AgentState):
+        """
+        Determine if we should continue to tools or end.
+        """
+        last_message = state["messages"][-1]
+        
+        # If the LLM called a tool, route there
+        if last_message.tool_calls:
+            return "tools"
+        
+        # Otherwise, if it returned text (and hopefully the final JSON), end
+        # Ideally, we'd validate the JSON structure here.
+        return END
 
-workflow.add_conditional_edges(
-    "orchestrator",
-    should_continue,
-    {
-        "tools": "tools",
-        END: END
-    }
-)
+    workflow.add_conditional_edges(
+        "orchestrator",
+        should_continue,
+        {
+            "tools": "tools",
+            END: END
+        }
+    )
+    
+    # After tools execute, go back to orchestrator to reason on the output
+    workflow.add_edge("tools", "orchestrator")
+    
+    # Compile
+    return workflow.compile()
 
-# After tools execute, go back to orchestrator to reason on the output
-workflow.add_edge("tools", "orchestrator")
+# Default app instance for backward compatibility
+app = create_workflow()
 
-# Compile
-app = workflow.compile()
-
-# 5. Example Execution
+# 6. Example Execution
 if __name__ == "__main__":
     print("--- Orchestrator Initialized ---")
     

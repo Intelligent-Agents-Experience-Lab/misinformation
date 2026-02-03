@@ -180,6 +180,25 @@ def search_duckduckgo(query: str, timeout: int = 5) -> List[Dict[str, Any]]:
                 break
     return results
 
+# Global Ablation Configuration
+# Default: All features enabled (Baseline)
+ABLATION_CONFIG = {
+    "use_umls": True,
+    "use_filtering": True,
+    "use_prioritization": True,
+    "use_span_extraction": True,
+    "use_calibration": True,
+    "use_recency": True,
+    "use_faithfulness": True,
+    "use_debate": True,
+    "use_critic": True  # New flag to toggle the agent itself
+}
+
+def set_ablation_config(config: Dict[str, bool]):
+    """Helper to update global ablation settings."""
+    global ABLATION_CONFIG
+    ABLATION_CONFIG.update(config)
+
 @tool
 def claim_parsing_tool(input_text: str) -> Dict[str, Any]:
     """
@@ -187,9 +206,14 @@ def claim_parsing_tool(input_text: str) -> Dict[str, Any]:
     """
     print(f"\n[Claim Parsing Tool] Processing: {input_text[:50]}...")
     
-    api_key = os.getenv("UMLS_API_KEY", "434afa2f-c6ae-4cbd-8ccc-f19892392414")
-    normalizer = UMLSNormalizer(api_key)
-    entities, warnings = normalizer.normalize(input_text)
+    if ABLATION_CONFIG["use_umls"]:
+        api_key = os.getenv("UMLS_API_KEY", "434afa2f-c6ae-4cbd-8ccc-f19892392414")
+        normalizer = UMLSNormalizer(api_key)
+        entities, warnings = normalizer.normalize(input_text)
+    else:
+        print("[Ablation] UMLS Normalization DISABLED.")
+        entities = []
+        warnings = ["UMLS Disabled by Ablation"]
     
     return {
         "claims": [
@@ -220,7 +244,11 @@ def evidence_retrieval_tool(claim_text: str) -> Dict[str, Any]:
         }
     
     # Apply A2 Internal Controls: Filtering & Deduplication
-    filtered_results = filtering_and_dedup_tool(results)
+    if ABLATION_CONFIG["use_filtering"]:
+        filtered_results = filtering_and_dedup_tool(results)
+    else:
+        print("[Ablation] Filtering DISABLED. Passing all results.")
+        filtered_results = results[:10]  # Cap at 10 to avoid token overload
     
     # Simple summary of the search results
     summary = "\n\n".join([f"Source: {r['title']}\nURL: {r['link']}\nSnippet: {r['snippet']}" for r in filtered_results])
@@ -241,10 +269,18 @@ def reasoning_explanation_tool(claim: str, evidence: str, evidence_items: List[D
     print(f"\n[A3 Reasoning] analyzing claim vs evidence...")
 
     # 1. Prioritize Evidence
-    prioritized_docs = evidence_prioritization_tool(evidence_items or [], claim)
+    if ABLATION_CONFIG["use_prioritization"]:
+        prioritized_docs = evidence_prioritization_tool(evidence_items or [], claim)
+    else:
+         print("[Ablation] Prioritization DISABLED.")
+         prioritized_docs = evidence_items[:5] if evidence_items else []
     
     # 2. Extract Spans
-    spans = verbatim_span_extraction_tool(prioritized_docs, claim)
+    if ABLATION_CONFIG["use_span_extraction"]:
+        spans = verbatim_span_extraction_tool(prioritized_docs, claim)
+    else:
+        print("[Ablation] Span Extraction DISABLED.")
+        spans = []
     
     # Analyze the content of the evidence strings for better mock behavior
     full_text = " ".join([d.get("snippet", "") + " " + d.get("title", "") for d in prioritized_docs]).lower()
@@ -269,13 +305,20 @@ def reasoning_explanation_tool(claim: str, evidence: str, evidence_items: List[D
         net_signal = 0.0
         
     # 4. Calibration
-    factors = {"conflicting_sources": False, "stale_data": False}
-    calibrated = logistic_calibration_tool(
-        support_signal=2.0 if net_signal > 0 else 0.0,
-        counter_signal=2.0 if net_signal < 0 else 0.0,
-        factors=factors
-    )
-    confidence = calibrated["confidence"]
+    confidence = 0.5  # Default mid
+    if ABLATION_CONFIG["use_calibration"]:
+        factors = {"conflicting_sources": False, "stale_data": False}
+        calibrated = logistic_calibration_tool(
+            support_signal=2.0 if net_signal > 0 else 0.0,
+            counter_signal=2.0 if net_signal < 0 else 0.0,
+            factors=factors
+        )
+        confidence = calibrated["confidence"]
+    else:
+        print("[Ablation] Calibration DISABLED.")
+        # Mock confidence directly from signal
+        confidence = 0.9 if net_signal > 1 else (0.1 if net_signal < -1 else 0.5)
+
     
     # 5. Label Selection
     # Confidence represents Probability(True). 
@@ -321,6 +364,20 @@ def critic_calibration_tool(claim: str, evidence: str = "", citations: List[str]
     """
     print(f"\n[A4 Critic] Reviewing reasoning for: {claim[:30]}...")
 
+    # 0. Ablation Bypass
+    if not ABLATION_CONFIG.get("use_critic", True):
+        print("[Ablation] Critic Agent DISABLED. Passing through provisional findings.")
+        return {
+            "status": "approved",
+            "claim": claim,
+            "label": provisional_label,
+            "explanation": explanation,
+            "confidence": confidence,
+            "citations": citations or [],
+            "flags": ["critic_disabled"],
+            "proposed_queries": []
+        }
+
     # 1. Schema & Integrity Check
     if not claim or not provisional_label:
         return {"status": "rejected", "flags": ["schema_violation"], "proposed_queries": []}
@@ -337,11 +394,12 @@ def critic_calibration_tool(claim: str, evidence: str = "", citations: List[str]
             date = "2024-01-01" 
             if "2020" in snippet or "2019" in snippet: date = "2019-01-01"
             
-            recency = recency_decay_tool(date)
-            if recency["status"] == "stale" and "stale_guidance" not in flags:
-                flags.append("stale_guidance")
-                penalties.append(-0.1)
-
+            if ABLATION_CONFIG["use_recency"]:
+                recency = recency_decay_tool(date)
+                if recency["status"] == "stale" and "stale_guidance" not in flags:
+                    flags.append("stale_guidance")
+                    penalties.append(-0.1)
+    
     # 4. Credibility Requirements
     trusted_domains = ["cdc.gov", "who.int", "nih.gov", "pubmed.ncbi.nlm.nih.gov", "mayoclinic.org", "clevelandclinic.org"]
     high_cred_count = sum(1 for c in (citations or []) if any(d in c for d in trusted_domains))
@@ -362,19 +420,24 @@ def critic_calibration_tool(claim: str, evidence: str = "", citations: List[str]
          final_explanation = final_explanation.replace("should", "may").replace("recommend", "suggests")
 
     # 7. Confidence Adjustment
-    adj_result = confidence_adjustment_tool(confidence, penalties)
-    final_conf = adj_result["final_confidence"]
+    final_conf = confidence
+    if ABLATION_CONFIG["use_calibration"]:
+        adj_result = confidence_adjustment_tool(confidence, penalties)
+        final_conf = adj_result["final_confidence"]
 
     # 8. Lightweight Debate
     # Trigger if confidence is middling (0.35 - 0.7) and we have flags
-    if 0.35 < final_conf < 0.7 and flags:
-        debate = debate_adjudicator_tool(
-            pro_argument=f"Supported by {high_cred_count} sources.",
-            con_argument=f"Flagged for {', '.join(flags)}."
-        )
-        if debate["winner"] == "con":
-            final_conf = max(0.0, final_conf - 0.1)
-            final_explanation += f" (Note: {debate['adjudication']})"
+    if ABLATION_CONFIG["use_debate"]:
+        if 0.35 < final_conf < 0.7 and flags:
+            debate = debate_adjudicator_tool(
+                pro_argument=f"Supported by {high_cred_count} sources.",
+                con_argument=f"Flagged for {', '.join(flags)}."
+            )
+            if debate["winner"] == "con":
+                final_conf = max(0.0, final_conf - 0.1)
+                final_explanation += f" (Note: {debate['adjudication']})"
+    else:
+        print("[Ablation] Debate DISABLED.")
 
     status = "approved"
     if flags or final_conf != confidence or final_explanation != explanation:
@@ -384,19 +447,8 @@ def critic_calibration_tool(claim: str, evidence: str = "", citations: List[str]
     # Downgrade if confidence ambiguous
     final_label = provisional_label
     
-    # Interpretation:
-    # < 0.35: Confident it's False (Misinformation)
-    # > 0.65: Confident it's True (True)
-    # 0.35 - 0.65: Uncertain (Insufficient)
-
-    # Interpretation:
-    # > 0.65: True (True)
-    # <= 0.65: Misinformation (False or Unverified)
-
     if 0.35 <= final_conf <= 0.65:
         final_label = "Misinformation"
-        # if provisional_label != "Misinformation":
-        #      status = "edited"
         pass
     elif final_conf < 0.35:
         final_label = "Misinformation"
@@ -643,3 +695,4 @@ def debate_adjudicator_tool(pro_argument: str, con_argument: str) -> Dict[str, A
         return {"winner": "pro", "adjudication": "Pro affirms clinical guideline superiority."}
     
     return {"winner": "con", "adjudication": "Con identifies significant evidence gap or counter-guidance."}
+
