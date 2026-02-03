@@ -3,6 +3,7 @@ import operator
 from typing import TypedDict, Annotated, List, Union
 
 from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
@@ -75,8 +76,19 @@ def create_workflow(config: dict = None, tools_list: list = None, llm_config: di
             kwargs["base_url"] = llm_config["base_url"]
         if "api_key" in llm_config:
             kwargs["api_key"] = llm_config["api_key"]
+        if "model_provider" in llm_config:
+            model_provider = llm_config["model_provider"]
+        else:
+            model_provider = "openai" # Default if not specified but llm_config exists
+    else:
+         model_provider = "openai"
     
-    llm = ChatOpenAI(model=model_name, **kwargs)
+    if model_provider == "ollama":
+        # ChatOllama specific handling
+        # Note: ChatOllama uses 'base_url' as well if provided
+        llm = ChatOllama(model=model_name, **kwargs)
+    else:
+        llm = ChatOpenAI(model=model_name, **kwargs)
     llm_with_tools = llm.bind_tools(tools_list)
 
     # 4. Define Orchestrator Node

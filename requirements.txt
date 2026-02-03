@@ -11,3 +11,4 @@ langsmith
 openevals
 datasets
 openai
+langchain-ollama

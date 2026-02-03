@@ -89,6 +89,7 @@ def main():
     parser.add_argument("--experiment", type=str, default="all", help="Specific experiment to run (key name) or 'all'.")
     parser.add_argument("--model", type=str, default=None, help="Override LLM model name (e.g., 'gpt-3.5-turbo', 'llama3').")
     parser.add_argument("--model-base-url", type=str, default=None, help="Override LLM base URL (e.g., 'http://localhost:11434/v1').")
+    parser.add_argument("--model-provider", type=str, default="openai", choices=["openai", "ollama"], help="Specify LLM provider (openai or ollama). Default: openai")
     args = parser.parse_args()
 
     configs = get_configs()
@@ -115,6 +116,8 @@ def main():
             cli_llm_config["model_name"] = args.model
         if args.model_base_url:
             cli_llm_config["base_url"] = args.model_base_url
+        if args.model_provider:
+            cli_llm_config["model_provider"] = args.model_provider
             
         # Merge with experiment specific (if any)
         exp_llm_config = settings.get("llm_config", {})
