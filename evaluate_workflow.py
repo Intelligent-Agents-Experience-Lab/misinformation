@@ -108,28 +108,10 @@ def hf_statistical_evaluators(inputs: dict, outputs: dict, reference_outputs: di
 
 def performance_evaluators(inputs: dict, outputs: dict, reference_outputs: dict):
     latency = outputs.get("latency_sec", 0)
-    entities = outputs.get("entities", [])
-    answer = outputs.get("answer", "")
-
-    # Entity Consistency Score
-    addressed_count = 0
-    if entities:
-        for entity in entities:
-            if entity.lower() in answer.lower():
-                addressed_count += 1
-        consistency_score = addressed_count / len(entities)
-    else:
-        consistency_score = 1.0 # No entities to cover
-
-    # Evidence Density
-    urls = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', answer)
-    unique_sources = len(set(urls))
 
     return {
         "results": [
-            {"key": "latency_seconds", "score": latency},
-            {"key": "entity_consistency", "score": consistency_score},
-            {"key": "unique_source_count", "score": float(unique_sources)}
+            {"key": "latency_seconds", "score": latency}
         ]
     }
 
@@ -160,8 +142,6 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
     Args:
         max_examples (int): Optional limit on number of examples to evaluate.
     """
-    print(f"Starting evaluation: {experiment_prefix} on dataset: {dataset_name} (Max Examples: {max_examples})")
-
     print(f"Starting evaluation: {experiment_prefix} on dataset: {dataset_name} (Max Examples: {max_examples})")
 
     # Define Custom Evaluators due to import issues
@@ -205,10 +185,6 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
         except: return {"key": "relevance", "score": 0.5}
         
     # Placeholder for embedding distance (skipping complex dependency for now)
-    def embedding_distance_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
-        # Mock or simplified string distance if embedding model unavailable
-        # We'll use a simple Levenshtein ratio proxy or just skip if no embeddings
-        return {"key": "embedding_distance", "score": 0.0} # Placeholder
 
     def task_completion_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
         judge_llm = ChatOpenAI(model="o3-mini")
@@ -305,6 +281,92 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
         except Exception as e:
             return {"key": "argument_correctness", "score": 0, "comment": f"Eval Error: {str(e)}"}
 
+    def step_efficiency_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
+        judge_llm = ChatOpenAI(model="o3-mini")
+        question = inputs.get("question", "")
+        tools_called = outputs.get("tools_called", [])
+
+        prompt = f"""Evaluate the step efficiency of the agent (0 to 1).
+        Question: {question}
+        Tool Calls taken: {tools_called}
+
+        Criteria:
+        1. Were any tool calls redundant or unnecessary?
+        2. Did the agent take the most direct path to the answer?
+        3. Penalize for repeated calls with same/similar arguments if they didn't add new info.
+
+        Return a JSON object: {{"score": <0-1>, "reason": "<explanation>"}}
+        """
+        try:
+            response = judge_llm.invoke(prompt)
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            result = json.loads(content)
+            return {
+                "key": "step_efficiency", 
+                "score": result.get("score", 0), 
+                "comment": result.get("reason", "")
+            }
+        except Exception as e:
+            return {"key": "step_efficiency", "score": 0, "comment": f"Eval Error: {str(e)}"}
+
+    def plan_adherence_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
+        judge_llm = ChatOpenAI(model="o3-mini")
+        question = inputs.get("question", "")
+        reasoning = outputs.get("agent_reasoning", "")
+        tools_called = outputs.get("tools_called", [])
+
+        prompt = f"""Evaluate the agent's plan adherence (0 to 1).
+        Question: {question}
+        Agent Reasoning/Plan: {reasoning}
+        Tool Calls taken: {tools_called}
+
+        Criteria:
+        1. Did the agent follow the plan it outlined in its reasoning?
+        2. If it deviated, was the deviation justified?
+        3. If no clear plan was stated, but tool calls were made, assess if the actions align with the implicit intent.
+
+        Return a JSON object: {{"score": <0-1>, "reason": "<explanation>"}}
+        """
+        try:
+            response = judge_llm.invoke(prompt)
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            result = json.loads(content)
+            return {
+                "key": "plan_adherence", 
+                "score": result.get("score", 0), 
+                "comment": result.get("reason", "")
+            }
+        except Exception as e:
+            return {"key": "plan_adherence", "score": 0, "comment": f"Eval Error: {str(e)}"}
+
+    def plan_quality_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
+        judge_llm = ChatOpenAI(model="o3-mini")
+        question = inputs.get("question", "")
+        reasoning = outputs.get("agent_reasoning", "")
+
+        prompt = f"""Evaluate the agent's plan quality (0 to 1).
+        Question: {question}
+        Agent reasoning/plan: {reasoning}
+
+        Criteria:
+        1. Does the plan address all parts of the user question?
+        2. Is the plan logical and does it use appropriate tools?
+        3. Is the plan detailed enough to be actionable?
+
+        Return a JSON object: {{"score": <0-1>, "reason": "<explanation>"}}
+        """
+        try:
+            response = judge_llm.invoke(prompt)
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            result = json.loads(content)
+            return {
+                "key": "plan_quality", 
+                "score": result.get("score", 0), 
+                "comment": result.get("reason", "")
+            }
+        except Exception as e:
+            return {"key": "plan_quality", "score": 0, "comment": f"Eval Error: {str(e)}"}
+
 
     # 3. Define Target Function (Closure to capture app_instance)
     def target(inputs: dict) -> dict:
@@ -316,6 +378,7 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
 
         start_time = time.perf_counter()
         tools_called = []
+        agent_reasoning = ""
         evidence_context = ""
         entities_found = []
         final_output_str = ""
@@ -344,6 +407,9 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
                     if key == "orchestrator":
                         last_msg = value["messages"][-1]
                         if isinstance(last_msg, AIMessage):
+                            if last_msg.content:
+                                agent_reasoning += last_msg.content + "\n"
+                                
                             if last_msg.tool_calls:
                                 for tc in last_msg.tool_calls:
                                     tools_called.append({
@@ -379,6 +445,7 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
             "answer": answer_text,
             "predicted_label": predicted_label,
             "tools_called": tools_called,
+            "agent_reasoning": agent_reasoning,
             "evidence": evidence_context,
             "entities": list(set(entities_found)),
             "latency_sec": end_time - start_time
@@ -402,10 +469,12 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
                 conciseness_evaluator,
                 coherence_evaluator,
                 relevance_evaluator,
-                embedding_distance_evaluator,
                 task_completion_evaluator,
                 tool_correctness_evaluator,
-                argument_correctness_evaluator
+                argument_correctness_evaluator,
+                step_efficiency_evaluator,
+                plan_adherence_evaluator,
+                plan_quality_evaluator
             ],
             experiment_prefix=experiment_prefix,
             max_concurrency=1,
@@ -422,10 +491,12 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
                 conciseness_evaluator,
                 coherence_evaluator,
                 relevance_evaluator,
-                embedding_distance_evaluator,
                 task_completion_evaluator,
                 tool_correctness_evaluator,
-                argument_correctness_evaluator
+                argument_correctness_evaluator,
+                step_efficiency_evaluator,
+                plan_adherence_evaluator,
+                plan_quality_evaluator
             ],
             experiment_prefix=experiment_prefix,
             max_concurrency=1,
