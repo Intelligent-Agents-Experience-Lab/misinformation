@@ -210,6 +210,102 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
         # We'll use a simple Levenshtein ratio proxy or just skip if no embeddings
         return {"key": "embedding_distance", "score": 0.0} # Placeholder
 
+    def task_completion_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
+        judge_llm = ChatOpenAI(model="o3-mini")
+        question = inputs.get("question", "")
+        prediction = outputs.get("answer", "")
+        reference = reference_outputs.get("answer", "")
+
+        prompt = f"""Rate the following response on task completion (0 to 1).
+        Task: Verify if the medical claim '{question}' is true or misinformation, and provide an explanation.
+        Reference Answer: {reference}
+        Model Response: {prediction}
+
+        Criteria:
+        1. Did the model provide a clear label?
+        2. Did the model provide a supporting explanation?
+        3. Is the outcome aligned with the task requirements?
+
+        Return a JSON object: {{"score": <0-1>, "reason": "<explanation>"}}
+        """
+        try:
+            response = judge_llm.invoke(prompt)
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            result = json.loads(content)
+            return {
+                "key": "task_completion", 
+                "score": result.get("score", 0), 
+                "comment": result.get("reason", "")
+            }
+        except Exception as e:
+            return {"key": "task_completion", "score": 0, "comment": f"Eval Error: {str(e)}"}
+
+    def tool_correctness_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
+        judge_llm = ChatOpenAI(model="o3-mini")
+        question = inputs.get("question", "")
+        tools_called = outputs.get("tools_called", [])
+        
+        # Define available tools
+        available_tools = [
+            "claim_parsing_tool", "evidence_retrieval_tool", 
+            "reasoning_explanation_tool", "critic_calibration_tool", 
+            "final_reporting_tool", "pubmed_search_tool", 
+            "cross_lingual_bundle_tool"
+        ]
+
+        prompt = f"""Evaluate the tool usage correctness (0 to 1).
+        Question: {question}
+        Tools Called: {tools_called}
+        Available Tools: {available_tools}
+
+        Criteria:
+        1. Were the tools called relevant to the question?
+        2. Was the order of tool calls logical (e.g., parsing before retrieval)?
+        3. Were any essential tools missed?
+
+        Return a JSON object: {{"score": <0-1>, "reason": "<explanation>"}}
+        """
+        try:
+            response = judge_llm.invoke(prompt)
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            result = json.loads(content)
+            return {
+                "key": "tool_correctness", 
+                "score": result.get("score", 0), 
+                "comment": result.get("reason", "")
+            }
+        except Exception as e:
+            return {"key": "tool_correctness", "score": 0, "comment": f"Eval Error: {str(e)}"}
+
+    def argument_correctness_evaluator(inputs: dict, outputs: dict, reference_outputs: dict):
+        judge_llm = ChatOpenAI(model="o3-mini")
+        question = inputs.get("question", "")
+        tools_called = outputs.get("tools_called", []) # Now with args!
+
+        prompt = f"""Evaluate the argument correctness for each tool call (0 to 1).
+        Question: {question}
+        Tool Calls: {tools_called}
+
+        Criteria:
+        1. Were the search queries in tools like `evidence_retrieval_tool` or `pubmed_search_tool` relevant?
+        2. Did the parsing tool receive the correct input text?
+        3. Are the arguments logically sound for the task?
+
+        Return a JSON object: {{"score": <0-1>, "reason": "<explanation>"}}
+        """
+        try:
+            response = judge_llm.invoke(prompt)
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            result = json.loads(content)
+            return {
+                "key": "argument_correctness", 
+                "score": result.get("score", 0), 
+                "comment": result.get("reason", "")
+            }
+        except Exception as e:
+            return {"key": "argument_correctness", "score": 0, "comment": f"Eval Error: {str(e)}"}
+
+
     # 3. Define Target Function (Closure to capture app_instance)
     def target(inputs: dict) -> dict:
         user_input = inputs["question"]
@@ -250,7 +346,10 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
                         if isinstance(last_msg, AIMessage):
                             if last_msg.tool_calls:
                                 for tc in last_msg.tool_calls:
-                                    tools_called.append(tc['name'])
+                                    tools_called.append({
+                                        "name": tc['name'],
+                                        "args": tc['args']
+                                    })
                             else:
                                 final_output_str = last_msg.content
         except Exception as e:
@@ -303,7 +402,10 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
                 conciseness_evaluator,
                 coherence_evaluator,
                 relevance_evaluator,
-                embedding_distance_evaluator
+                embedding_distance_evaluator,
+                task_completion_evaluator,
+                tool_correctness_evaluator,
+                argument_correctness_evaluator
             ],
             experiment_prefix=experiment_prefix,
             max_concurrency=1,
@@ -320,7 +422,10 @@ def run_evaluation(app_instance, dataset_name, experiment_prefix="misinfo-eval",
                 conciseness_evaluator,
                 coherence_evaluator,
                 relevance_evaluator,
-                embedding_distance_evaluator
+                embedding_distance_evaluator,
+                task_completion_evaluator,
+                tool_correctness_evaluator,
+                argument_correctness_evaluator
             ],
             experiment_prefix=experiment_prefix,
             max_concurrency=1,

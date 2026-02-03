@@ -12,3 +12,4 @@ openevals
 datasets
 openai
 langchain-ollama
+deepeval
