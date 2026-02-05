@@ -13,7 +13,12 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from main import app as default_app
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
+
+# Debug: Print environment info to verify keys
+api_key = os.getenv("LANGSMITH_API_KEY")
+print(f"--- DEBUG: LANGSMITH_API_KEY: {api_key[:10]}...{api_key[-5:] if api_key else 'None'} ---")
+print(f"--- DEBUG: LANGSMITH_PROJECT: {os.getenv('LANGSMITH_PROJECT')} ---")
 
 client = Client()
 
@@ -26,7 +31,7 @@ meteor_metric = evaluate.load("meteor")
 # 1. Load Dataset
 print("Loading Health_Misinformation dataset...")
 ds = load_dataset("ClassyB/Health_Misinformation", split="train")
-subset = ds.select(range(5))
+subset = ds.select(range(300))
 
 # 2. Prepare LangSmith Dataset
 dataset_name = "Health_Misinformation_Eval_Subset"

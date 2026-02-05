@@ -29,20 +29,27 @@ from tools import (
     debate_adjudicator_tool,
     set_ablation_config  # Import config setter
 )
-from orchestrator_prompt import ORCHESTRATOR_SYSTEM_PROMPT
+import json
+
+# Load prompts
+with open("prompts.json", "r", encoding="utf-8") as f:
+    PROMPTS = json.load(f)
+
+ORCHESTRATOR_SYSTEM_PROMPT = PROMPTS["orchestrator_system_prompt"]
 
 
 # Load environment variables (ensure .env exists with OPENAI_API_KEY)
-load_dotenv()
+load_dotenv(override=True)
 
 # Factory function for creating the workflow dynamically
-def create_workflow(config: dict = None, tools_list: list = None, llm_config: dict = None):
+def create_workflow(config: dict = None, tools_list: list = None, llm_config: dict = None, system_prompt: str = None):
     """
     Creates and compiles the StateGraph workflow.
     Args:
         config (dict): Optional ablation configuration to override defaults.
         tools_list (list): Optional list of tools to use (defaults to full set).
         llm_config (dict): Optional LLM settings (model_name, base_url, api_key).
+        system_prompt (str): Optional custom system prompt (defaults to ORCHESTRATOR_SYSTEM_PROMPT).
     """
     
     # 1. Update Global Ablation Config if provided
@@ -87,6 +94,16 @@ def create_workflow(config: dict = None, tools_list: list = None, llm_config: di
         # ChatOllama specific handling
         # Note: ChatOllama uses 'base_url' as well if provided
         llm = ChatOllama(model=model_name, **kwargs)
+    elif model_provider == "openrouter":
+        # OpenRouter is OpenAI-compatible
+        # We ensure the base_url is set correctly for OpenRouter
+        kwargs["base_url"] = "https://openrouter.ai/api/v1"
+        # We try to get the OPENROUTER_API_KEY if not already in kwargs
+        if "api_key" not in kwargs:
+            kwargs["api_key"] = os.getenv("OPENROUTER_API_KEY")
+        
+        # OpenRouter often benefits from additional headers but ChatOpenAI handles common needs
+        llm = ChatOpenAI(model=model_name, **kwargs)
     else:
         llm = ChatOpenAI(model=model_name, **kwargs)
     llm_with_tools = llm.bind_tools(tools_list)
@@ -98,10 +115,8 @@ def create_workflow(config: dict = None, tools_list: list = None, llm_config: di
         It uses the specific system prompt to govern the workflow.
         """
         messages = state["messages"]
-        
-        # Ensure system prompt is the first message
-        # In a real app, you might handle this initialization differently
-        prompt_message = SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT)
+        # Use custom system prompt if provided, otherwise default
+        prompt_message = SystemMessage(content=system_prompt or ORCHESTRATOR_SYSTEM_PROMPT)
         
         # We construct the call. If messages is empty (start), add system prompt.
         # If not empty, we need to ensure the model sees the system prompt.

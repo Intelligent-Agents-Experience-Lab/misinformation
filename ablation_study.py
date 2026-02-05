@@ -7,6 +7,18 @@ from tools import (
     critic_calibration_tool, final_reporting_tool, pubmed_search_tool, 
     cross_lingual_bundle_tool
 )
+import json
+
+# Load prompts
+with open("prompts.json", "r", encoding="utf-8") as f:
+    PROMPTS = json.load(f)
+
+ZERO_SHOT_SYSTEM_PROMPT = PROMPTS["zero_shot_system_prompt"]
+FEW_SHOT_SYSTEM_PROMPT = PROMPTS["few_shot_system_prompt"]
+COT_SYSTEM_PROMPT = PROMPTS.get("cot_orchestrator_system_prompt")
+MED_PERSONA_SYSTEM_PROMPT = PROMPTS.get("med_persona_orchestrator_system_prompt")
+PUBMED_ONLY_SYSTEM_PROMPT = PROMPTS.get("pubmed_only_system_prompt")
+WEB_ONLY_SYSTEM_PROMPT = PROMPTS.get("web_only_system_prompt")
 
 def get_configs():
     """
@@ -18,6 +30,16 @@ def get_configs():
         cross_lingual_bundle_tool
     ]
 
+    # Tool Isolation Variants
+    pubmed_only_tools = [
+        claim_parsing_tool, pubmed_search_tool, reasoning_explanation_tool, 
+        critic_calibration_tool, final_reporting_tool
+    ]
+    web_only_tools = [
+        claim_parsing_tool, evidence_retrieval_tool, reasoning_explanation_tool, 
+        critic_calibration_tool, final_reporting_tool
+    ]
+
     # Configuration Definitions
     configs = {
         "Baseline": {
@@ -27,6 +49,42 @@ def get_configs():
                 "use_recency": True, "use_faithfulness": True, "use_debate": True
             },
             "tools": base_tools
+        },
+        "PubMed_Only": {
+            "config": {
+                "use_umls": True, "use_filtering": True, "use_prioritization": True, 
+                "use_span_extraction": True, "use_calibration": True, 
+                "use_recency": True, "use_faithfulness": True, "use_debate": True
+            },
+            "tools": pubmed_only_tools,
+            "system_prompt": PUBMED_ONLY_SYSTEM_PROMPT
+        },
+        "Web_Only": {
+            "config": {
+                "use_umls": True, "use_filtering": True, "use_prioritization": True, 
+                "use_span_extraction": True, "use_calibration": True, 
+                "use_recency": True, "use_faithfulness": True, "use_debate": True
+            },
+            "tools": web_only_tools,
+            "system_prompt": WEB_ONLY_SYSTEM_PROMPT
+        },
+        "CoT_Orchestrator": {
+            "config": {
+                "use_umls": True, "use_filtering": True, "use_prioritization": True, 
+                "use_span_extraction": True, "use_calibration": True, 
+                "use_recency": True, "use_faithfulness": True, "use_debate": True
+            },
+            "tools": base_tools,
+            "system_prompt": COT_SYSTEM_PROMPT
+        },
+        "Med_Persona": {
+            "config": {
+                "use_umls": True, "use_filtering": True, "use_prioritization": True, 
+                "use_span_extraction": True, "use_calibration": True, 
+                "use_recency": True, "use_faithfulness": True, "use_debate": True
+            },
+            "tools": base_tools,
+            "system_prompt": MED_PERSONA_SYSTEM_PROMPT
         },
         "A1_No_UMLS": {
             "config": {
@@ -52,7 +110,7 @@ def get_configs():
             },
             "tools": base_tools
         },
-        "A3_No_Calibration": {
+        "A4_No_Calibration": {
             "config": {
                 "use_umls": True, "use_filtering": True, "use_prioritization": True, 
                 "use_span_extraction": True, "use_calibration": False, 
@@ -60,24 +118,23 @@ def get_configs():
             },
             "tools": base_tools
         },
-        "A4_No_Critic_Agent": {
-            "config": {
-                # Config flags don't matter much if the tool is removed, but for consistency:
-                "use_umls": True, "use_filtering": True, "use_prioritization": True, 
-                "use_span_extraction": True, "use_calibration": True, 
-                "use_recency": False, "use_faithfulness": False, "use_debate": False,
-                "use_critic": False
-            },
-            # Remove Critic Tool? NO. Keep it as dummy to prevent Prompt Confusion.
-            "tools": base_tools
-        },
-        "A4_No_Debate": {
+        "A5_No_Debate": {
             "config": {
                 "use_umls": True, "use_filtering": True, "use_prioritization": True, 
                 "use_span_extraction": True, "use_calibration": True, 
                 "use_recency": True, "use_faithfulness": True, "use_debate": False
             },
             "tools": base_tools
+        },
+        "Zero_Shot": {
+            "config": {},
+            "tools": [], # No tools for zero-shot
+            "system_prompt": ZERO_SHOT_SYSTEM_PROMPT
+        },
+        "Few_Shot": {
+            "config": {},
+            "tools": [], # No tools for few-shot
+            "system_prompt": FEW_SHOT_SYSTEM_PROMPT
         }
     }
     return configs
@@ -89,7 +146,7 @@ def main():
     parser.add_argument("--experiment", type=str, default="all", help="Specific experiment to run (key name) or 'all'.")
     parser.add_argument("--model", type=str, default=None, help="Override LLM model name (e.g., 'gpt-3.5-turbo', 'llama3').")
     parser.add_argument("--model-base-url", type=str, default=None, help="Override LLM base URL (e.g., 'http://localhost:11434/v1').")
-    parser.add_argument("--model-provider", type=str, default="openai", choices=["openai", "ollama"], help="Specify LLM provider (openai or ollama). Default: openai")
+    parser.add_argument("--model-provider", type=str, default="openai", choices=["openai", "ollama", "openrouter"], help="Specify LLM provider (openai, ollama, or openrouter). Default: openai")
     args = parser.parse_args()
 
     configs = get_configs()
@@ -124,7 +181,12 @@ def main():
         final_llm_config = {**exp_llm_config, **cli_llm_config}
         
         # 1. Create Workflow
-        app_instance = create_workflow(config=settings["config"], tools_list=settings["tools"], llm_config=final_llm_config)
+        app_instance = create_workflow(
+            config=settings["config"], 
+            tools_list=settings["tools"], 
+            llm_config=final_llm_config,
+            system_prompt=settings.get("system_prompt")
+        )
         
         # 2. Run Evaluation
         # We append a timestamp or unique ID in LangSmith via the key
