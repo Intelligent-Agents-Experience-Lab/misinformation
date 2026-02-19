@@ -38,9 +38,15 @@ The project includes a robust evaluation pipeline (`evaluate_workflow.py`) with 
 pip install -r requirements.txt
 ```
 
-### Running the Workflow
+### Running the Workflow of signle Agent
 ```python
 python main.py
+```
+
+
+### Running the Workflow of multi Agent
+```python
+python multi_agent_main.py
 ```
 
 ### Running Evaluations
